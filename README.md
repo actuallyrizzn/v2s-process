@@ -1,3 +1,7 @@
+Here is a draft of the `README.md` file for your repository:
+
+---
+
 # Process
 
 This repository hosts a set of scripts designed to automate the process of downloading a YouTube video, extracting its audio, transcribing the audio, and summarizing the transcribed text. It's perfect for quickly generating summaries of long video content.
@@ -8,12 +12,10 @@ Repo URL: [http://github.com/actuallyrizzn/process](http://github.com/actuallyri
 
 The main workflow is controlled by a bash script `process.sh`, which in turn calls several Python scripts and a bash script to complete specific tasks:
 
-### 1. `process.sh`
+### 1. `process`
 This is the master script that coordinates the entire process. It takes a YouTube video URL as input and outputs a summarized text of the video content.
 
-Arguments:
-- `-u` or `--url`: YouTube video URL (required)
-- `-d` or `--dir`: Destination directory for the downloaded video (optional)
+Usage: ./process <youtube url>
 
 ### 2. `ytget.py`
 This Python script downloads a YouTube video. It uses the `pytube` library to do this.
@@ -67,3 +69,7 @@ You can also specify a destination directory for the downloaded video:
 - pytube
 - openai
 - ffmpeg
+
+---
+
+This is a draft and can be further refined and formatted according to your preferences. Please replace `<YouTube Video URL>` and `<Destination Directory>` with the actual URL and directory when you use the script.
