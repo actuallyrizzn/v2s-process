@@ -3,7 +3,10 @@ import openai
 import requests
 
 # Set your OpenAI API key
-openai.api_key = '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'
+# Open the file and read the API key
+with open('openai.api', 'r') as file:
+    openai.api_key = file.readline().strip()
+
 
 # Open the output.mp3 file in read-binary mode
 with open('output.mp3', 'rb') as audio_file:
