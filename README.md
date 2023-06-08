@@ -1,7 +1,3 @@
-Here is a draft of the `README.md` file for your repository:
-
----
-
 # Process
 
 This repository hosts a set of scripts designed to automate the process of downloading a YouTube video, extracting its audio, transcribing the audio, and summarizing the transcribed text. It's perfect for quickly generating summaries of long video content.
@@ -71,7 +67,3 @@ You can also specify a destination directory for the downloaded video:
 - pytube
 - openai
 - ffmpeg
-
----
-
-This is a draft and can be further refined and formatted according to your preferences. Please replace `<YouTube Video URL>` and `<Destination Directory>` with the actual URL and directory when you use the script.
