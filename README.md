@@ -1,6 +1,3 @@
-Here is a draft of the `README.md` file for your repository:
-
----
 
 # Process
 
@@ -70,6 +67,4 @@ You can also specify a destination directory for the downloaded video:
 - openai
 - ffmpeg
 
----
-
-This is a draft and can be further refined and formatted according to your preferences. Please replace `<YouTube Video URL>` and `<Destination Directory>` with the actual URL and directory when you use the script.
+p
