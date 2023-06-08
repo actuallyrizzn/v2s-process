@@ -4,8 +4,9 @@ import time
 import sys
 from collections import OrderedDict
 
-# Authenticate OpenAI API
-openai.api_key = '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'
+# Open the file and read the API key
+with open('openai.api', 'r') as file:
+    openai.api_key = file.readline().strip()
 
 # Max tokens for a chunk
 chunk_max = 4000
