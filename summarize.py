@@ -2,92 +2,151 @@ import os
 import openai
 import time
 import sys
-from collections import OrderedDict
-
-# Open the file and read the API key
-with open('openai.api', 'r') as file:
-    openai.api_key = file.readline().strip()
+import threading
+import argparse
 
 # Max tokens for a chunk
 chunk_max = 4000
 
-# Initialize list for summaries
-summaries = []
-
 # Spinner to show script is working
 def spinner():
-    while True:
+    while not stop_spinner:
         for cursor in '|/-\\':
-            yield cursor
-
-spin = spinner()
+            sys.stdout.write(cursor)
+            sys.stdout.flush()
+            time.sleep(0.1)
+            sys.stdout.write('\b')
 
 def spin_cursor():
-    sys.stdout.write(next(spin))
-    sys.stdout.flush()
-    sys.stdout.write('\b')
+    global stop_spinner
+    stop_spinner = False
+    spinner_thread = threading.Thread(target=spinner)
+    spinner_thread.start()
 
-# Get list of all files in current directory
-files = [f for f in os.listdir('.') if os.path.isfile(f) and f.endswith('.txt')]
+def stop_cursor():
+    global stop_spinner
+    stop_spinner = True
 
-print("Checking files in the current directory...")
+def main(args):
+    # Initialize list for summaries
+    summaries = []
 
-if len(files) > 1:
-    print("Multiple chunk files found. Combining...")
-    # Combine all chunk files into one
-    with open('combined.txt', 'w') as outfile:
-        for fname in files:
-            with open(fname) as infile:
-                outfile.write(infile.read())
-    transcript_file = 'combined.txt'
-else:
-    print("Single transcript file found.")
-    transcript_file = files[0]
+    # Get list of all files in current directory
+    try:
+        files = [f for f in os.listdir('.') if os.path.isfile(f) and f.endswith('.txt')]
+    except Exception as e:
+        print(f"Error occurred while listing files: {e}")
+        return
 
-print("Transcript file prepared.")
+    print("Checking files in the current directory...")
 
-with open(transcript_file, 'r') as file:
-    data = file.read()
+    # Combine all files into one if there are multiple
+    if len(files) > 1:
+        print("Multiple chunk files found. Combining them into one...")
+        try:
+            with open(args.output_combined, 'w') as outfile:
+                for fname in files:
+                    with open(fname) as infile:
+                        outfile.write(infile.read())
+            transcript_file = args.output_combined
+        except Exception as e:
+            print(f"Error occurred while combining files: {e}")
+            return
+    else:
+        print("Single transcript file found.")
+        transcript_file = files[0]
 
-print("Breaking transcript into chunks...")
-chunks = [data[i:i+chunk_max] for i in range(0, len(data), chunk_max)]
+    print("Transcript file prepared.")
 
-print("Transcript broken into", len(chunks), "chunks.")
+    try:
+        with open(transcript_file, 'r') as file:
+            data = file.read()
+    except Exception as e:
+        print(f"Error occurred while reading transcript file: {e}")
+        return
 
-print("Generating summaries...")
+    # Calculate the actual chunk_max, taking into account the length of the prompt
+    actual_chunk_max = chunk_max - len(args.prompt)
 
-for chunk in chunks:
-    response = openai.Completion.create(
-        engine="text-davinci-003",  # or your preferred engine
-        prompt=f"Here is the transcribed text from a video discussion: \n\n{chunk}\n\n Could you please summarize the main topics or points of view presented by the speakers?",
-        temperature=0.5,
-        max_tokens=200
-    )
+    # Split the transcript into chunks
+    print("Breaking transcript into chunks...")
+    chunks = [data[i:i+actual_chunk_max] for i in range(0, len(data), actual_chunk_max)]
 
-    # Spin cursor while waiting for response
-    while response == None:
-        spin_cursor()
-        time.sleep(0.1)
-    
-    summaries.append(response.choices[0].text.strip())
+    print("Transcript broken into", len(chunks), "chunks.")
 
-print("Summaries generated.")
+    print("Generating summaries...")
 
-print("Deduplicating summaries...")
-summaries = list(OrderedDict.fromkeys(summaries))
+    # Start spinner
+    spin_cursor()
 
-print("Writing summaries to file...")
-with open("summary.txt", 'w') as outfile:
-    for summary in summaries:
-        outfile.write(summary + '\n')
+    # Generate summaries for each chunk
+    for chunk in chunks:
+        try:
+            response = openai.Completion.create(
+                engine=args.engine,  
+                prompt=f"{args.prompt} \n\n{chunk}\n\n",
+                temperature=args.temperature,
+                max_tokens=args.max_tokens
+            )
+        except openai.error.OpenAIError as e:
+            print(f"Error occurred while generating summaries: {e}")
+            return
 
-print("Summary file created.")
+        summaries.append(response.choices[0].text.strip())
 
-print("Cleaning up original files...")
-for f in files:
-    os.remove(f)
+    # Stop spinner
+    stop_cursor()
 
-if os.path.exists("combined.txt"):
-    os.remove("combined.txt")
+    print("Summaries generated.")
 
-print("Cleanup completed.")
+    print("Deduplicating summaries...")
+    summaries = list(dict.fromkeys(summaries))
+
+    print("Writing summaries to file...")
+    try:
+        with open(args.output_summary, 'w') as outfile:
+            for summary in summaries:
+                outfile.write(summary + '\n')
+    except Exception as e:
+        print(f"Error occurred while writing summaries to file: {e}")
+        return
+
+    print("Summary file created.")
+
+    # Cleanup is optional, controlled by command-line argument
+    if args.cleanup:
+        print("Cleaning up original files...")
+        for f in files:
+           try:
+                os.remove(f)
+            except Exception as e:
+                print(f"Error occurred while deleting file {f}: {e}")
+                return
+
+        if os.path.exists(args.output_combined):
+            try:
+                os.remove(args.output_combined)
+            except Exception as e:
+                print(f"Error occurred while deleting file {args.output_combined}: {e}")
+                return
+
+        print("Cleanup completed.")
+
+if __name__ == "__main__":
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description='Generate summaries from text chunks.')
+    parser.add_argument('--no-cleanup', dest='cleanup', action='store_false', help='Disable cleanup of original files.')
+    parser.add_argument('--engine', default="text-davinci-003", help='Specify the engine to be used.')
+    parser.add_argument('--temperature', type=float, default=0.5, help='Specify the temperature.')
+    parser.add_argument('--max_tokens', type=int, default=200, help='Specify max tokens.')
+    parser.add_argument('--prompt', default="This is a transcribed text (without diarization) from an online video. Could you summarize the main topics or points of view presented by the speakers in bullet point form?", help='Specify the prompt.')
+    parser.add_argument('--output_summary', default="summary.txt", help='Specify the output summary file name.')
+    parser.add_argument('--output_combined', default="combined.txt", help='Specify the output combined file name.')
+    parser.set_defaults(cleanup=True)
+    args = parser.parse_args()
+
+    # Open the file and read the API key
+    openai.api_key = os.environ['OPENAI_KEY']
+
+    stop_spinner = False
+    main(args)
