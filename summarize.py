@@ -4,6 +4,10 @@ import time
 import sys
 import threading
 import argparse
+from dotenv import load_dotenv
+
+# Load .env file if it exists
+load_dotenv()
 
 # Max tokens for a chunk
 chunk_max = 4000
@@ -117,7 +121,7 @@ def main(args):
     if args.cleanup:
         print("Cleaning up original files...")
         for f in files:
-           try:
+            try:
                 os.remove(f)
             except Exception as e:
                 print(f"Error occurred while deleting file {f}: {e}")
@@ -145,8 +149,12 @@ if __name__ == "__main__":
     parser.set_defaults(cleanup=True)
     args = parser.parse_args()
 
-    # Open the file and read the API key
-    openai.api_key = os.environ['OPENAI_KEY']
+    # Get API key from environment variables
+    openai.api_key = os.getenv('OPENAI_KEY')
+
+    if openai.api_key is None:
+        print("Error: OpenAI API key not found. Please make sure the OPENAI_KEY environment variable is set.")
+        sys.exit(1)
 
     stop_spinner = False
     main(args)
