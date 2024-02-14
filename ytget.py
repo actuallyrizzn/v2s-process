@@ -1,100 +1,42 @@
-# Import necessary libraries
-from pytube import YouTube
-import os
-import re
-import sys
-import logging
+#!/usr/bin/python3
 import argparse
-import time
+from pytube import YouTube
 
-# Function to display download progress
 def progress_function(stream, chunk, bytes_remaining):
     total_size = stream.filesize
     bytes_downloaded = total_size - bytes_remaining
-    progress = bytes_downloaded / total_size
-    download_speed = bytes_downloaded / (time.time() - start_time)
-    remaining_bytes = bytes_remaining
-    estimated_remaining_time = remaining_bytes / download_speed if download_speed > 0 else 0
 
-    # Display progress
-    sys.stdout.write("\r")
-    sys.stdout.write(f"Progress: [{int(progress * 100):3}%] ")
-    sys.stdout.write(f"Download Speed: {human_readable_size(download_speed)}/s ")
-    sys.stdout.write(f"Remaining Time: {format_time(estimated_remaining_time)} ")
-    sys.stdout.flush()
+    percentage_of_completion = bytes_downloaded / total_size * 100
+    print(f"\r{percentage_of_completion:.2f}% downloaded", end="")
 
-# Function to download a YouTube video
-def download_video(url: str, destination_dir: str = None, output_filename: str = 'video.mp4') -> list[str]:
-    if destination_dir is None:
-        destination_dir = os.getcwd()
-    suggestions = []
-    if not re.match(r'^https?://(?:www\.)?(?:youtube\.com/(?:watch\?v=|live/)|youtu\.be/)([\w-]+)$', url):
-        suggestions.append('Invalid URL format')
-        return suggestions
-    if 'youtu.be' in url:
-        video_id = url.split('/')[-1]
-        url = f'https://www.youtube.com/watch?v={video_id}'
-    if not os.path.isdir(os.path.abspath(destination_dir)):
-        suggestions.append('Invalid destination directory')
-        return suggestions
-    try:
-        youtube = YouTube(url, on_progress_callback=progress_function)
-        video = youtube.streams.get_highest_resolution()
-        if video is None:
-            suggestions.append('No suitable stream found')
-        else:
-            global start_time
-            start_time = time.time()
+def complete_function(stream, file_path):
+    print("\nDownload completed and saved to:", file_path)
 
-            video.download(output_path=destination_dir, filename=output_filename)
+def download_video(url, output_filename=None, output_path='.'):
+    yt = YouTube(url)
+    yt.register_on_progress_callback(progress_function)
+    yt.register_on_complete_callback(complete_function)
 
-            sys.stdout.write("\n")  # Move to a new line after download completes
-            suggestions.append(f'Video saved to {os.path.join(destination_dir, output_filename)}')
-    except pytube.exceptions.RegexMatchError:
-        suggestions.append('Invalid URL format')
-    except pytube.exceptions.VideoUnavailable:
-        suggestions.append('The video is unavailable')
-    except pytube.exceptions.LiveStreamError:
-        suggestions.append('The video is a live stream')
-    except pytube.exceptions.ExtractError:
-        suggestions.append('Error occurred while extracting video information')
-    except pytube.exceptions.PytubeError:
-        suggestions.append('Error occurred while downloading the video')
-    except Exception as e:
-        suggestions.append(f'Unexpected error occurred: {e}')
-    return suggestions
+    # If no output filename is given, use the video's title and add .mp4 extension
+    if not output_filename:
+        output_filename = yt.title + ".mp4"
 
-# Utility function to format time in HH:MM:SS format
-def format_time(seconds: float) -> str:
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    seconds = int(seconds % 60)
-    return f"{hours:02}:{minutes:02}:{seconds:02}"
+    # Select the lowest resolution MP4 stream
+    video = sorted(
+        [stream for stream in yt.streams.filter(file_extension='mp4', progressive=True)],
+        key=lambda x: x.resolution if x.resolution else "9999"
+    )[0]
 
-# Utility function to convert bytes to human-readable size
-def human_readable_size(size: float) -> str:
-    units = ["B", "KB", "MB", "GB", "TB"]
-    index = 0
-    while size >= 1024 and index < len(units) - 1:
-        size /= 1024
-        index += 1
-    return f"{size:.2f} {units[index]}"
+    video.download(output_path, filename=output_filename)
 
-# Create parser
-parser = argparse.ArgumentParser(description='Download YouTube videos.')
-parser.add_argument('url', help='YouTube video URL.')
-parser.add_argument('-l', '--log', action='store_true', help='Enable logging.')
-parser.add_argument('-f', '--filename', default='video.mp4', help='Output file name.')
-args = parser.parse_args()
+def main():
+    parser = argparse.ArgumentParser(description='Download YouTube video with specified output name.')
+    parser.add_argument('url', help='The URL of the YouTube video.')
+    parser.add_argument('-f', '--file', dest='output_filename', default=None, help='The desired output filename without extension. Defaults to the YouTube video title if not specified.')
+    parser.add_argument('--output_path', default='.', help='The output path for the downloaded video.')
+    args = parser.parse_args()
 
-# Set up logging
-if args.log:
-    logging.basicConfig(level=logging.INFO)
+    download_video(args.url, args.output_filename, args.output_path)
 
-suggestions = download_video(args.url, output_filename=args.filename)
-
-for suggestion in suggestions:
-    if args.log:
-        logging.info(suggestion)
-    else:
-        print(suggestion)
+if __name__ == '__main__':
+    main()
