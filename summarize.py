@@ -1,160 +1,183 @@
+import json
+import traceback
 import os
 import openai
-import time
 import sys
-import threading
 import argparse
 from dotenv import load_dotenv
+from mergecore import log, backoff_and_retry
+from tokencount import calculate_tokens
 
 # Load .env file if it exists
 load_dotenv()
+openai.api_key = os.environ.get('OPENAI_KEY')
 
-# Max tokens for a chunk
-chunk_max = 4000
+# Here's the updated version of the generate_summaries function with more logging statements for better visibility into the progress.
 
-# Spinner to show script is working
-def spinner():
-    while not stop_spinner:
-        for cursor in '|/-\\':
-            sys.stdout.write(cursor)
-            sys.stdout.flush()
-            time.sleep(0.1)
-            sys.stdout.write('\b')
+def generate_summaries(prompt_max_tokens=2500, 
+                       input_file=None, 
+                       output_file=None, 
+                       cleanup=False, 
+                       engine="gpt-3.5-turbo-0613", 
+                       temperature=0.5, 
+                       max_tokens=int(8192), 
+                       prompt="This is a transcribed text (without diarization) from an online video. Could you summarize the main topics or points of view presented by the speakers in bullet point form?", 
+                       log_file=None):
 
-def spin_cursor():
-    global stop_spinner
-    stop_spinner = False
-    spinner_thread = threading.Thread(target=spinner)
-    spinner_thread.start()
-
-def stop_cursor():
-    global stop_spinner
-    stop_spinner = True
-
-def main(args):
-    # Initialize list for summaries
-    summaries = []
-
-    # Get list of all files in current directory
-    try:
-        files = [f for f in os.listdir('.') if os.path.isfile(f) and f.endswith('.txt')]
-    except Exception as e:
-        print(f"Error occurred while listing files: {e}")
-        return
-
-    print("Checking files in the current directory...")
-
-    # Combine all files into one if there are multiple
-    if len(files) > 1:
-        print("Multiple chunk files found. Combining them into one...")
+    if input_file:
+        transcript_file = input_file
         try:
-            with open(args.output_combined, 'w') as outfile:
-                for fname in files:
-                    with open(fname) as infile:
-                        outfile.write(infile.read())
-            transcript_file = args.output_combined
+            with open(transcript_file, 'r') as file:
+                data = file.read()
+
+            log("Calculating tokens for prompt...")
+            prompt_token_output = calculate_tokens(prompt, model=engine, json_output=True)
+            if isinstance(prompt_token_output, str):
+                prompt_token_output = json.loads(prompt_token_output)
+            prompt_token_count = prompt_token_output['tokens']
+            log(f"Prompt token count: {prompt_token_count}")
+
+            log("Calculating tokens for data...")
+            data_token_output = calculate_tokens(data, model=engine, json_output=True)
+            if isinstance(data_token_output, str):
+                data_token_output = json.loads(data_token_output)
+            data_token_count = data_token_output['tokens']
+            log(f"Data token count: {data_token_count}")
+
+            chunks_text = []
+            if prompt_token_count + data_token_count > prompt_max_tokens:
+                tokens_per_chunk = prompt_max_tokens - prompt_token_count
+                start_idx = 0
+
+                log("Starting chunking process...")
+                while start_idx < len(data):
+                    log(f"Getting chunk starting from index {start_idx}...")
+                    chunk, tokens_used = get_chunk(data[start_idx:], tokens_per_chunk, model=engine)
+                    log(f"Chunk obtained with {tokens_used} tokens.")
+                    chunks_text.append(chunk)
+                    start_idx += len(chunk)
+            else:
+                chunks_text = [data]
+
+            log(f"Transcript broken into {len(chunks_text)} chunks.")
+            with open(output_file, 'w') as outfile:
+                for idx, chunk_text in enumerate(chunks_text, start=1):
+                    log(f"Processing chunk {idx}...")
+                    system_message = f"You are a helpful assistant. You are reading chunk {idx} of {len(chunks_text)}."
+                    user_message = f"{prompt} \n\nChunk {idx} of {len(chunks_text)}:\n\n{chunk_text}\n\n"
+                    messages = [
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": user_message},
+                    ]
+
+                    log("Calculating message tokens...")
+                    message_token_output = calculate_tokens(messages, model=engine, json_output=True)
+                    if isinstance(message_token_output, str):
+                        message_token_output = json.loads(message_token_output)
+
+                    token_count_for_messages = message_token_output['tokens']
+                    api_max_tokens = max_tokens - token_count_for_messages
+                    api_max_tokens = max(1, min(api_max_tokens, max_tokens))
+
+                    log("Getting response from OpenAI API...")
+                    response = backoff_and_retry(lambda: openai.ChatCompletion.create(
+                        model=engine,
+                        messages=messages,
+                        max_tokens=api_max_tokens,
+                        temperature=temperature
+                    ))
+                    summary = response['choices'][0]['message']['content'].strip()
+
+                    log(f"Summary for chunk {idx}: {summary}")
+                    outfile.write(summary + '\n')
+                log("Summaries generated.")
+
+            if cleanup and input_file:
+                try:
+                    log("Starting cleanup...")
+                    os.remove(input_file)
+                except Exception as e:
+                    log(f"Error occurred while deleting file {input_file}: {e}")
+                return
+
+            log("Cleanup completed.")
         except Exception as e:
-            print(f"Error occurred while combining files: {e}")
+            log(f"Error occurred: {traceback.format_exc()}")
             return
     else:
-        print("Single transcript file found.")
-        transcript_file = files[0]
+        log("Error: No input source provided. Please specify an input file.")
+        return output_file
 
-    print("Transcript file prepared.")
+# Adding a visual indicator in the get_chunk function to show progress during the chunk size reduction process
 
-    try:
-        with open(transcript_file, 'r') as file:
-            data = file.read()
-    except Exception as e:
-        print(f"Error occurred while reading transcript file: {e}")
-        return
+# Implementing the binary search approach in the get_chunk function
 
-    # Calculate the actual chunk_max, taking into account the length of the prompt
-    actual_chunk_max = chunk_max - len(args.prompt)
+# Correcting the mistake in the get_chunk function
 
-    # Split the transcript into chunks
-    print("Breaking transcript into chunks...")
-    chunks = [data[i:i+actual_chunk_max] for i in range(0, len(data), actual_chunk_max)]
+def get_chunk(text, max_tokens, model):
+    left = 0
+    right = len(text)
+    
+    while left < right:
+        middle = (left + right) // 2
+        chunk = text[:middle]
+        
+        token_output = calculate_tokens(chunk, model=model, json_output=True)
+        if isinstance(token_output, str):
+            token_output = json.loads(token_output)
+        
+        tokens_in_chunk = token_output['tokens']
+        
+        if tokens_in_chunk == max_tokens:
+            return chunk, tokens_in_chunk
+        elif tokens_in_chunk < max_tokens:
+            left = middle + 1
+        else:
+            right = middle - 1
 
-    print("Transcript broken into", len(chunks), "chunks.")
+    # Corrected the JSON parsing before accessing the 'tokens' field
+    final_chunk = text[:left]
+    final_token_output = calculate_tokens(final_chunk, model=model, json_output=True)
+    if isinstance(final_token_output, str):
+        final_token_output = json.loads(final_token_output)
+    final_tokens_in_chunk = final_token_output['tokens']
+    
+    return final_chunk, final_tokens_in_chunk
 
-    print("Generating summaries...")
-
-    # Start spinner
-    spin_cursor()
-
-    # Generate summaries for each chunk
-    for chunk in chunks:
-        try:
-            response = openai.Completion.create(
-                engine=args.engine,  
-                prompt=f"{args.prompt} \n\n{chunk}\n\n",
-                temperature=args.temperature,
-                max_tokens=args.max_tokens
-            )
-        except openai.error.OpenAIError as e:
-            print(f"Error occurred while generating summaries: {e}")
-            return
-
-        summaries.append(response.choices[0].text.strip())
-
-    # Stop spinner
-    stop_cursor()
-
-    print("Summaries generated.")
-
-    print("Deduplicating summaries...")
-    summaries = list(dict.fromkeys(summaries))
-
-    print("Writing summaries to file...")
-    try:
-        with open(args.output_summary, 'w') as outfile:
-            for summary in summaries:
-                outfile.write(summary + '\n')
-    except Exception as e:
-        print(f"Error occurred while writing summaries to file: {e}")
-        return
-
-    print("Summary file created.")
-
-    # Cleanup is optional, controlled by command-line argument
-    if args.cleanup:
-        print("Cleaning up original files...")
-        for f in files:
-            try:
-                os.remove(f)
-            except Exception as e:
-                print(f"Error occurred while deleting file {f}: {e}")
-                return
-
-        if os.path.exists(args.output_combined):
-            try:
-                os.remove(args.output_combined)
-            except Exception as e:
-                print(f"Error occurred while deleting file {args.output_combined}: {e}")
-                return
-
-        print("Cleanup completed.")
-
-if __name__ == "__main__":
-    # Parse command-line arguments
+def cli_main():
     parser = argparse.ArgumentParser(description='Generate summaries from text chunks.')
-    parser.add_argument('--no-cleanup', dest='cleanup', action='store_false', help='Disable cleanup of original files.')
-    parser.add_argument('--engine', default="text-davinci-003", help='Specify the engine to be used.')
+    parser.add_argument('--prompt_max_tokens', type=int, default=2500, help='Specify max tokens for the prompt.')
+    parser.add_argument('-i', '--input_file', help='Specify the input file.')
+    parser.add_argument('-o', '--output_file', help='Specify the output file.')
+    parser.add_argument('--cleanup', dest='cleanup', action='store_true', help='Enable cleanup of original files.')
+    parser.add_argument('--engine', default="gpt-3.5-turbo-0613", help='Specify the engine to be used.')
     parser.add_argument('--temperature', type=float, default=0.5, help='Specify the temperature.')
-    parser.add_argument('--max_tokens', type=int, default=200, help='Specify max tokens.')
+    parser.add_argument('--max_tokens', type=int, default=int(8192 * 0.8), help='Specify max tokens.')
     parser.add_argument('--prompt', default="This is a transcribed text (without diarization) from an online video. Could you summarize the main topics or points of view presented by the speakers in bullet point form?", help='Specify the prompt.')
-    parser.add_argument('--output_summary', default="summary.txt", help='Specify the output summary file name.')
-    parser.add_argument('--output_combined', default="combined.txt", help='Specify the output combined file name.')
-    parser.set_defaults(cleanup=True)
+    parser.add_argument('--log_file', help='Specify a log file to which output will be logged.')
+    parser.set_defaults(cleanup=False)
     args = parser.parse_args()
 
-    # Get API key from environment variables
     openai.api_key = os.getenv('OPENAI_KEY')
-
     if openai.api_key is None:
-        print("Error: OpenAI API key not found. Please make sure the OPENAI_KEY environment variable is set.")
+        log("Error: OpenAI API key not found. Please make sure the OPENAI_KEY environment variable is set.")
         sys.exit(1)
 
-    stop_spinner = False
-    main(args)
+    generate_summaries(
+        prompt_max_tokens=args.prompt_max_tokens,
+        input_file=args.input_file,
+        output_file=args.output_file,
+        cleanup=args.cleanup,
+        engine=args.engine,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        prompt=args.prompt,
+        log_file=args.log_file
+    )
+
+if __name__ == "__main__":
+    try:
+        cli_main()
+    except Exception as e:
+        print(f"Error occurred: {e}")
+        traceback.print_exc()
