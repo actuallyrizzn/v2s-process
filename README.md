@@ -1,7 +1,7 @@
 
-# Process
+# v2s-process
 
-This repository hosts a set of scripts designed to automate the process of downloading a YouTube video, extracting its audio, transcribing the audio, and summarizing the transcribed text. It's perfect for quickly generating summaries of long video content.
+This repository hosts a set of scripts designed to automate the process of downloading a YouTube video, extracting its audio, transcribing the audio, and summarizing the transcribed text. It's perfect for quickly generating summaries of long video content. This is basically a fork of http://github.com/actuallyrizzn/process. I'm simplifying the "original" of process so that it can be more widely used, and keeping this as a repo of the video and pdf specific variant.
 
 Repo URL: [http://github.com/actuallyrizzn/process](http://github.com/actuallyrizzn/process)
 
